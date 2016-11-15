@@ -19,8 +19,8 @@ var DAT = DAT || {};
 DAT.Globe = function (container, opts) {
   //  初始化参数
   opts = opts || {};
-  var imgDir = opts.imgDir || './';
-  
+  var imgDir = opts.imgDir || './data/';
+
   //  颜色取值函数
   var colorFn = opts.colorFn || function (x) {
     var c = new THREE.Color();
@@ -135,29 +135,30 @@ DAT.Globe = function (container, opts) {
     mesh = new THREE.Mesh(geometry, material);
     mesh.rotation.y = Math.PI;
     scene.add(mesh);
+    //  ---------------------------------------
 
     shader = Shaders['atmosphere'];
     uniforms = THREE.UniformsUtils.clone(shader.uniforms);
 
     material = new THREE.ShaderMaterial({
-
       uniforms: uniforms,
       vertexShader: shader.vertexShader,
       fragmentShader: shader.fragmentShader,
       side: THREE.BackSide,
       blending: THREE.AdditiveBlending,
       transparent: true
-
     });
 
     mesh = new THREE.Mesh(geometry, material);
     mesh.scale.set(1.1, 1.1, 1.1);
     scene.add(mesh);
+    //  ------------------------------------------
 
     geometry = new THREE.BoxGeometry(0.75, 0.75, 1);
     geometry.applyMatrix(new THREE.Matrix4().makeTranslation(0, 0, -0.5));
 
     point = new THREE.Mesh(geometry);
+    //  ------------------------------------------
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(w, h);
@@ -228,6 +229,7 @@ DAT.Globe = function (container, opts) {
       addPoint(lat, lng, size, color, subgeo);
     }
     if (opts.animated) {
+      //  what is morphTargets?
       this._baseGeometry.morphTargets.push({ 'name': opts.name, vertices: subgeo.vertices });
     } else {
       this._baseGeometry = subgeo;
@@ -368,6 +370,7 @@ DAT.Globe = function (container, opts) {
     render();
   }
 
+  //  通过旋转、推拉相机位置实现地球浏览
   function render() {
     zoom(curZoomSpeed);
 
