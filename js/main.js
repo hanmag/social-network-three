@@ -348,7 +348,7 @@
             if (INTERSECTED != intersects[0].index) {
                 group2.children = [];
                 INTERSECTED = intersects[0].index;
-                particleSizes[INTERSECTED] = 90;
+                particleSizes[INTERSECTED] = 128;
                 particleColors[INTERSECTED * 3] = 255;
                 particleColors[INTERSECTED * 3 + 1] = 255;
                 particleColors[INTERSECTED * 3 + 2] = 0;
@@ -372,9 +372,7 @@
             }
         }
 
-        if (INTERSECTED === null) {
-            target.x += 0.002;
-        }
+        target.x += 0.0015;
 
         rotation.x += (target.x - rotation.x) * 0.1;
         rotation.y += (target.y - rotation.y) * 0.1;
