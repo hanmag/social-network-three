@@ -1,21 +1,4 @@
 var Shaders = {
-    'atmosphere': {
-        uniforms: {},
-        vertexShader: [
-            'varying vec3 vNormal;',
-            'void main() {',
-            'vNormal = normalize( normalMatrix * normal );',
-            'gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );',
-            '}'
-        ].join('\n'),
-        fragmentShader: [
-            'varying vec3 vNormal;',
-            'void main() {',
-            'float intensity = pow( 1.3 + dot( vNormal, vec3( 0, 0, 1.0 ) ), 2.9 );',
-            'gl_FragColor = vec4( 0.3, 0.5, 1.0, 0.4 ) * intensity;',
-            '}'
-        ].join('\n')
-    },
     'point': {
         uniforms: {},
         vertexShader: [
@@ -26,9 +9,9 @@ var Shaders = {
             'void main() {',
             'vColor = customColor;',
             'vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );',
-            'gl_PointSize = size * ( 300.0 / -mvPosition.z );',
+            'gl_PointSize = size;',
             'gl_Position = projectionMatrix * mvPosition;',
-            'opacity = (gl_PointSize - 12.0) / 24.0;',
+            'opacity = (gl_PointSize - 20.0) / 25.0;',
             '}'
         ].join('\n'),
         fragmentShader: [
@@ -42,4 +25,15 @@ var Shaders = {
             '}'
         ].join('\n')
     }
+};
+
+var Materials = {
+    'specialLine': new THREE.MeshPhongMaterial({
+        color: 0xffff00,
+        specular: 0x333333,
+        shininess: 150,
+        side: THREE.FrontSide,
+        vertexColors: THREE.VertexColors,
+        shading: THREE.SmoothShading
+    })
 };
