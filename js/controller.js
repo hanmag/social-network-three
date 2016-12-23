@@ -38,6 +38,7 @@ function onMouseDown(event) {
     container.addEventListener('mousemove', onMouseMove, false);
     container.addEventListener('mouseup', onMouseUp, false);
     container.addEventListener('mouseout', onMouseOut, false);
+    document.removeEventListener('mousemove', onDocumentMouseMove, false);
 
     mouseOnDown.x = -event.clientX;
     mouseOnDown.y = event.clientY;
@@ -63,18 +64,20 @@ function onMouseMove(event) {
 }
 
 function onMouseUp(event) {
+    if (Math.abs(mouseOnDown.x - mouse.x) < 1 && Math.abs(mouseOnDown.y - mouse.y) < 1)
+        SceneClicked();
+
     container.removeEventListener('mousemove', onMouseMove, false);
     container.removeEventListener('mouseup', onMouseUp, false);
     container.removeEventListener('mouseout', onMouseOut, false);
-
-    if (Math.abs(mouseOnDown.x - mouse.x) < 1 && Math.abs(mouseOnDown.y - mouse.y) < 1)
-        SceneClicked();
+    document.addEventListener('mousemove', onDocumentMouseMove, false);
 }
 
 function onMouseOut(event) {
     container.removeEventListener('mousemove', onMouseMove, false);
     container.removeEventListener('mouseup', onMouseUp, false);
     container.removeEventListener('mouseout', onMouseOut, false);
+    document.addEventListener('mousemove', onDocumentMouseMove, false);
 }
 
 function onDocumentMouseMove(event) {
