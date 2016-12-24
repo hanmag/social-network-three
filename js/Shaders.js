@@ -1,3 +1,8 @@
+/**
+ * 
+ * @author wangjue / https://github.com/hanmag
+ */
+
 var Shaders = {
     'point': {
         uniforms: {},

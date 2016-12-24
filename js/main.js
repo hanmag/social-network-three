@@ -10,6 +10,9 @@
 
     var cssRenderer, webglRenderer, cssScene, webglScene, camera, group, group2;
 
+    // special line 
+    var particalSystem;
+
     // line var
     var positions, colors, linesMesh;
 
@@ -22,7 +25,8 @@
     var time = 0;
 
     var raycaster, intersects;
-    var INTERSECTED = null,
+    var LASTINTERSECTED,
+        INTERSECTED = null,
         NEIGHBOURSA = [],
         NEIGHBOURSB = [];
 
@@ -73,6 +77,9 @@
         group2 = new THREE.Group();
         webglScene.add(group);
         webglScene.add(group2);
+
+        // particalSystem
+        particalSystem = new ParticalSystem(group2);
 
         // light
         webglScene.add(new THREE.AmbientLight(0x444444));
@@ -228,6 +235,8 @@
         var cameraPosition = camera.position;
         var particalCount = heroes.length;
         var linesCount = relations.length;
+        // special line partical
+        var pointsArray = [];
 
         for (var i = 0; i < particalCount; i++)
             particlesData[i].numConnections = 0;
@@ -318,7 +327,7 @@
             }
 
             // special lines when selected
-            if (i === INTERSECTED || j === INTERSECTED) {
+            if (INTERSECTED !== LASTINTERSECTED && (i === INTERSECTED || j === INTERSECTED)) {
                 var path = new THREE.CatmullRomCurve3([
                     new THREE.Vector3(particlePositions[i * 3], particlePositions[i * 3 + 1], particlePositions[i * 3 + 2]),
                     new THREE.Vector3(particlePositions[j * 3], particlePositions[j * 3 + 1], particlePositions[j * 3 + 2])
@@ -326,13 +335,22 @@
                 var spGeometry = new THREE.TubeGeometry(path, 1, 5, 8, false);
                 var spLine = new THREE.Mesh(spGeometry, Materials.specialLine);
                 group2.add(spLine);
+
+                pointsArray.push(path.points);
             }
+        }
+
+        if (pointsArray.length > 0) {
+            particalSystem.Init(pointsArray);
         }
 
         linesMesh.geometry.setDrawRange(0, numConnected * 2);
         pointCloud.geometry.setDrawRange(0, particalCount);
 
         requestAnimationFrame(animate);
+
+        if (LASTINTERSECTED !== INTERSECTED)
+            LASTINTERSECTED = INTERSECTED;
 
         render();
     }
@@ -396,6 +414,8 @@
         pointCloud.geometry.attributes.position.needsUpdate = true;
         pointCloud.geometry.attributes.customColor.needsUpdate = true;
         pointCloud.geometry.attributes.size.needsUpdate = true;
+
+        particalSystem.Update();
 
         cssRenderer.render(cssScene, camera);
         webglRenderer.render(webglScene, camera);
