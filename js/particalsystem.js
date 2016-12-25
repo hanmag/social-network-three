@@ -71,11 +71,11 @@ ParticalSystem = function (group) {
             particlePositions[i * 3 + 1] = points[i].y;
             particlePositions[i * 3 + 2] = points[i].z;
 
-            particleColors[i * 3] = 2;
-            particleColors[i * 3 + 1] = 2;
-            particleColors[i * 3 + 2] = 0;
+            particleColors[i * 3] = 1;
+            particleColors[i * 3 + 1] = 1;
+            particleColors[i * 3 + 2] = 1;
 
-            particleSizes[i] = 30.0;
+            particleSizes[i] = 20.0;
         }
 
         particles.addAttribute('position', new THREE.BufferAttribute(particlePositions, 3).setDynamic(true));
@@ -100,8 +100,7 @@ ParticalSystem = function (group) {
 
             blending: THREE.AdditiveBlending,
             depthTest: false,
-            transparent: true,
-            // sizeAttenuation: true,
+            transparent: true
         });
 
         particalSystem = new THREE.Points(particles, shaderMaterial);
@@ -128,7 +127,7 @@ ParticalSystem = function (group) {
             particleColors[i * 3 + 1] = 2;
             particleColors[i * 3 + 2] = 0;
 
-            particleSizes[i] = 40.0;
+            particleSizes[i] = 36.0;
         }
 
         particalSystem.geometry.attributes.position.needsUpdate = true;

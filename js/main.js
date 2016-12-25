@@ -13,6 +13,9 @@
     // special line 
     var particalSystem;
 
+    // Suspending panel
+    var panelGalaxy;
+
     // line var
     var positions, colors, linesMesh;
 
@@ -78,15 +81,18 @@
         webglScene.add(group);
         webglScene.add(group2);
 
-        // particalSystem
-        particalSystem = new ParticalSystem(group2);
-
         // light
         webglScene.add(new THREE.AmbientLight(0x444444));
 
         //camera
         camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 1, 4000);
         camera.position.z = 1800;
+
+        // particalSystem
+        particalSystem = new ParticalSystem(group2);
+
+        // panelGalaxy
+        panelGalaxy = new PanelGalaxy(container, camera);
 
         // webgl renderer
         webglRenderer = new THREE.WebGLRenderer({
@@ -126,6 +132,7 @@
             INTERSECTED = null;
             NEIGHBOURSA = NEIGHBOURSB = [];
             group2.children = [];
+            panelGalaxy.Clear();
         };
     }
 
@@ -272,14 +279,17 @@
                 particleColors[i * 3 + 2] = 255;
 
                 // distance to size and to opacity(in shader).
-                var factor = 1.0;
-                particleSizes[i] = (2500 - dist) * 0.04 + factor * heroes[i].numConnections + 10;
+                var factor = 0.2;
+                var size = (2500 - dist) * 0.03 + factor * heroes[i].numConnections + 10;
+                if (size > 55)
+                    size = 55;
+                particleSizes[i] = size;
             }
 
             // marker, relative position and opacity
             var marker = heroes[i].marker;
 
-            marker.element.style.opacity = particleSizes[i] / 70;
+            marker.element.style.opacity = particleSizes[i] / 60;
             marker.element.style.visibility = (marker.element.style.opacity < 0.65) ? "hidden" : "visible";
 
             marker.position.x = particlePositions[i * 3] / 2;
@@ -370,6 +380,7 @@
                 particleColors[INTERSECTED * 3] = 255;
                 particleColors[INTERSECTED * 3 + 1] = 255;
                 particleColors[INTERSECTED * 3 + 2] = 0;
+                var points = [heroes[INTERSECTED]];
 
                 NEIGHBOURSA = NEIGHBOURSB = [];
                 relations.forEach(function (element) {
@@ -379,18 +390,26 @@
                         particleColors[objects[element.to].index * 3] = 2;
                         particleColors[objects[element.to].index * 3 + 1] = 2;
                         particleColors[objects[element.to].index * 3 + 2] = 0;
+
+                        points.push(objects[element.to]);
                     } else if (element.to === heroes[INTERSECTED].id) {
                         NEIGHBOURSA.push(objects[element.from].index);
                         particleSizes[objects[element.from].index] = 64;
                         particleColors[objects[element.from].index * 3] = 2;
                         particleColors[objects[element.from].index * 3 + 1] = 2;
                         particleColors[objects[element.from].index * 3 + 2] = 0;
+
+                        points.push(objects[element.from]);
                     }
                 }, this);
+
+                panelGalaxy.Select(points);
             }
         }
 
-        target.x += 0.0015;
+        if (INTERSECTED === null) {
+            target.x += 0.0015;
+        }
 
         rotation.x += (target.x - rotation.x) * 0.1;
         rotation.y += (target.y - rotation.y) * 0.1;
@@ -400,12 +419,11 @@
         camera.position.z = 1800 * Math.cos(rotation.x) * Math.cos(rotation.y);
         camera.lookAt(new THREE.Vector3(0, 0, 0));
 
-
         time += 0.002;
         for (var i = 0; i < heroes.length; i++) {
             if (particleSizes[i] > 60)
                 continue;
-            particleSizes[i] += 4.5 * Math.sin(25 * time);
+            particleSizes[i] += 5 * Math.sin(25 * time);
         }
 
         linesMesh.geometry.attributes.position.needsUpdate = true;
@@ -416,6 +434,7 @@
         pointCloud.geometry.attributes.size.needsUpdate = true;
 
         particalSystem.Update();
+        panelGalaxy.Update();
 
         cssRenderer.render(cssScene, camera);
         webglRenderer.render(webglScene, camera);

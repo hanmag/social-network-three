@@ -16,7 +16,7 @@ var Shaders = {
             'vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );',
             'gl_PointSize = size;',
             'gl_Position = projectionMatrix * mvPosition;',
-            'opacity = (gl_PointSize - 20.0) / 25.0;',
+            'opacity = (gl_PointSize - 5.0) / 25.0;',
             '}'
         ].join('\n'),
         fragmentShader: [
