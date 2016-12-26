@@ -33,6 +33,14 @@
         NEIGHBOURSA = [],
         NEIGHBOURSB = [];
 
+    //弹性系数，基础质量，临界长度, 摩擦系数
+    var _k = 0.05,
+        _m = 200,
+        _l = 100,
+        _f = 0.02;
+
+    var _l2 = _l * _l;
+
     loadData(function () {
         initScene();
         processData();
@@ -59,6 +67,7 @@
                     relations.forEach(function (element) {
                         objects[element.from].numConnections++;
                         objects[element.to].numConnections++;
+                        element.force = 0.0;
                     }, this);
 
                     success();
@@ -127,7 +136,7 @@
         window.addEventListener('resize', onWindowResize, false);
         document.addEventListener('mousemove', onDocumentMouseMove, false);
 
-        // event
+        // click event
         SceneClicked = function () {
             INTERSECTED = null;
             NEIGHBOURSA = NEIGHBOURSB = [];
@@ -144,53 +153,31 @@
     }
 
     function processData() {
-
+        // all nodes count
         var particalCount = heroes.length;
         // max segments
         var segmentsCount = particalCount * particalCount;
-
-        var uniforms = {
-            color: {
-                value: new THREE.Color(0xffffff)
-            },
-            texture: {
-                value: new THREE.TextureLoader().load("images/sprites/spark1.png")
-            }
-        };
-
-        var pMaterial = new THREE.ShaderMaterial({
-            uniforms: uniforms,
-            vertexShader: Shaders.point.vertexShader,
-            fragmentShader: Shaders.point.fragmentShader,
-
-            blending: THREE.AdditiveBlending,
-            depthTest: false,
-            transparent: true
-        });
-
+        // particle attributes
         var particles = new THREE.BufferGeometry();
         particlePositions = new Float32Array(particalCount * 3);
         particleColors = new Float32Array(particalCount * 3);
         particleSizes = new Float32Array(particalCount);
 
         for (var i = 0; i < particalCount; i++) {
-
-            var x = Math.random() * r - r / 2;
-            var y = Math.random() * r - r / 2;
-            var z = Math.random() * r - r / 2;
-
-            particlePositions[i * 3] = x;
-            particlePositions[i * 3 + 1] = y;
-            particlePositions[i * 3 + 2] = z;
-
-            particlesData.push({
-                velocity: new THREE.Vector3(-1 + Math.random() * 2, -1 + Math.random() * 2, -1 + Math.random() * 2),
-                numConnections: 0
-            });
-
+            particlePositions[i * 3] = Math.random() * r - r / 2;
+            particlePositions[i * 3 + 1] = Math.random() * r - r / 2;
+            particlePositions[i * 3 + 2] = Math.random() * r - r / 2;
             particleColors[i * 3] = 255;
             particleColors[i * 3 + 1] = 255;
             particleColors[i * 3 + 2] = 255;
+
+            // extra attributes
+            particlesData.push({
+                velocity: new THREE.Vector3(-1 + Math.random() * 2, -1 + Math.random() * 2, -1 + Math.random() * 2),
+                force: new THREE.Vector3(0, 0, 0),
+                speed: new THREE.Vector3(0, 0, 0),
+                numConnections: 0
+            });
 
             // marker: css object
             var element = document.createElement("div");
@@ -198,20 +185,19 @@
             element.innerHTML = heroes[i].name;
 
             var cssObject = new THREE.CSS3DObject(element);
-
             heroes[i].marker = cssObject;
             heroes[i].index = i;
-
             cssScene.add(cssObject);
         }
 
+        //add Attribute
         particles.addAttribute('position', new THREE.BufferAttribute(particlePositions, 3).setDynamic(true));
         particles.addAttribute('customColor', new THREE.BufferAttribute(particleColors, 3).setDynamic(true));
         particles.addAttribute('size', new THREE.BufferAttribute(particleSizes, 1).setDynamic(true));
         particles.computeBoundingSphere();
 
         // create the particle system
-        pointCloud = new THREE.Points(particles, pMaterial);
+        pointCloud = new THREE.Points(particles, NodeMaterial);
         group.add(pointCloud);
 
         // lines
@@ -224,13 +210,7 @@
         geometry.setDrawRange(0, 0);
         geometry.computeBoundingSphere();
 
-        var material = new THREE.LineBasicMaterial({
-            vertexColors: THREE.VertexColors,
-            blending: THREE.AdditiveBlending,
-            transparent: true
-        });
-
-        linesMesh = new THREE.LineSegments(geometry, material);
+        linesMesh = new THREE.LineSegments(geometry, LineMaterial);
         group.add(linesMesh);
     }
 
@@ -244,9 +224,36 @@
         var linesCount = relations.length;
         // special line partical
         var pointsArray = [];
+        // force speed
+        var sx, sy, sz;
 
-        for (var i = 0; i < particalCount; i++)
-            particlesData[i].numConnections = 0;
+        // nodes
+        for (var i = 0; i < particalCount; i++) {
+            for (var j = i + 1; j < particalCount; j++) {
+                var particleDataA = particlesData[i];
+                var particleDataB = particlesData[j];
+                var dx = particlePositions[i * 3] - particlePositions[j * 3];
+                var dy = particlePositions[i * 3 + 1] - particlePositions[j * 3 + 1];
+                var dz = particlePositions[i * 3 + 2] - particlePositions[j * 3 + 2];
+                var distp = dx * dx + dy * dy + dz * dz;
+                if (distp < _l2) {
+                    var push = _m / Math.sqrt(distp);
+                    particleDataA.force.add(new THREE.Vector3(dx, dy, dz).normalize().multiplyScalar(push));
+                    particleDataB.force.add(new THREE.Vector3(-dx, -dy, -dz).normalize().multiplyScalar(push));
+                }
+            }
+
+            var len = particlePositions[i * 3] * particlePositions[i * 3] +
+                particlePositions[i * 3 + 1] * particlePositions[i * 3 + 1] +
+                particlePositions[i * 3 + 2] * particlePositions[i * 3 + 2];
+
+            if (len < _l2) {
+                var gp = _m / Math.sqrt(len);
+                particlesData[i].force.add(new THREE.Vector3(particlePositions[i * 3], particlePositions[i * 3 + 1], particlePositions[i * 3 + 2]).normalize().multiplyScalar(gp));
+            }
+            if (particlesData[i].speed.length() > 0.5)
+                particlesData[i].force.add(particlesData[i].speed.clone().normalize().multiplyScalar(-1 * _f * _m));
+        }
 
         for (var i = 0; i < particalCount; i++) {
             if (i !== INTERSECTED &&
@@ -255,19 +262,20 @@
                 // particle
                 var particleData = particlesData[i];
 
-                // free move
-                particlePositions[i * 3] += 0.5 * particleData.velocity.x;
-                particlePositions[i * 3 + 1] += 0.5 * particleData.velocity.y;
-                particlePositions[i * 3 + 2] += 0.5 * particleData.velocity.z;
+                // free move in force
+                particleData.speed.add(particleData.force.clone().divideScalar(_m));
+                particlePositions[i * 3] += particleData.speed.x;
+                particlePositions[i * 3 + 1] += particleData.speed.y;
+                particlePositions[i * 3 + 2] += particleData.speed.z;
 
                 if (particlePositions[i * 3 + 1] < -rHalf || particlePositions[i * 3 + 1] > rHalf)
-                    particleData.velocity.y = -particleData.velocity.y;
+                    particleData.speed.y = -particleData.speed.y;
 
                 if (particlePositions[i * 3] < -rHalf || particlePositions[i * 3] > rHalf)
-                    particleData.velocity.x = -particleData.velocity.x;
+                    particleData.speed.x = -particleData.speed.x;
 
                 if (particlePositions[i * 3 + 2] < -rHalf || particlePositions[i * 3 + 2] > rHalf)
-                    particleData.velocity.z = -particleData.velocity.z;
+                    particleData.speed.z = -particleData.speed.z;
 
                 var dx = particlePositions[i * 3] - cameraPosition.x;
                 var dy = particlePositions[i * 3 + 1] - cameraPosition.y;
@@ -292,30 +300,44 @@
             marker.element.style.opacity = particleSizes[i] / 60;
             marker.element.style.visibility = (marker.element.style.opacity < 0.65) ? "hidden" : "visible";
 
-            marker.position.x = particlePositions[i * 3] / 2;
-            marker.position.y = particlePositions[i * 3 + 1] / 2 - (5 + particleSizes[i] / 8);
+            marker.position.x = particlePositions[i * 3] / Detector.getScale();
+            marker.position.y = particlePositions[i * 3 + 1] / Detector.getScale() - (5 + particleSizes[i] / 4 / Detector.getScale());
             marker.position.z = particlePositions[i * 3 + 2];
 
             marker.lookAt(cameraPosition);
         }
 
         // lines
+        for (var i = 0; i < particalCount; i++) {
+            particlesData[i].numConnections = 0;
+            particlesData[i].force = new THREE.Vector3(0, 0, 0);
+        }
+
         for (var index = 0; index < linesCount; index++) {
             var lineData = relations[index];
             var i = objects[lineData.from].index;
             var j = objects[lineData.to].index;
+
+            var dx = particlePositions[i * 3] - particlePositions[j * 3];
+            var dy = particlePositions[i * 3 + 1] - particlePositions[j * 3 + 1];
+            var dz = particlePositions[i * 3 + 2] - particlePositions[j * 3 + 2];
+            var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
             var particleDataA = particlesData[i];
             var particleDataB = particlesData[j];
             particleDataA.numConnections++;
             particleDataB.numConnections++;
 
-            var dx = particlePositions[i * 3] - particlePositions[j * 3];
-            var dy = particlePositions[i * 3 + 1] - particlePositions[j * 3 + 1];
-            var dz = particlePositions[i * 3 + 2] - particlePositions[j * 3 + 2];
-            var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist < _l / 2)
+                lineData.force = -50;
+            else if (dist > _l * 2)
+                lineData.force = 50;
+            else lineData.force = (dist - _l) * _k;
+            particleDataA.force.add(new THREE.Vector3(-dx, -dy, -dz).normalize().multiplyScalar(lineData.force));
+            particleDataB.force.add(new THREE.Vector3(dx, dy, dz).normalize().multiplyScalar(lineData.force));
+
             if (dist < 600) {
-                var alpha = (dist > 300) ? 0.005 : (0.2 - dist / 1500);
+                var alpha = (dist > 300) ? 0.005 : (0.1 - dist / 3000);
 
                 positions[vertexpos++] = particlePositions[i * 3];
                 positions[vertexpos++] = particlePositions[i * 3 + 1];
@@ -350,6 +372,7 @@
             }
         }
 
+        // special lines
         if (pointsArray.length > 0) {
             particalSystem.Init(pointsArray);
         }
@@ -428,7 +451,6 @@
 
         linesMesh.geometry.attributes.position.needsUpdate = true;
         linesMesh.geometry.attributes.color.needsUpdate = true;
-
         pointCloud.geometry.attributes.position.needsUpdate = true;
         pointCloud.geometry.attributes.customColor.needsUpdate = true;
         pointCloud.geometry.attributes.size.needsUpdate = true;

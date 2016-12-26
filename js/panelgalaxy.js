@@ -91,7 +91,7 @@ PanelGalaxy = function (container, mainCamera, heroes) {
         if (targets === undefined || targets.length == 0) {
             freeTime++;
 
-            if (freeTime > 50) {
+            if (freeTime > 500) {
                 var index = Math.floor(heroes.length * Math.random()) % heroes.length;
                 var index2 = Math.floor(heroes.length * Math.random()) % heroes.length;
                 select([heroes[index], heroes[index2]]);
@@ -114,7 +114,7 @@ PanelGalaxy = function (container, mainCamera, heroes) {
 
             var object2 = element.bond;
             var end = new THREE.Vector3(point.x * 600, point.y * 600, -10);
-            var start = new THREE.Vector3(cssObject.position.x, cssObject.position.y, -100);
+            var start = new THREE.Vector3(cssObject.position.x, cssObject.position.y, -50);
             tmpVec1.subVectors(start, end);
             var bondLength = tmpVec1.length() - 100;
             object2.element.style.height = bondLength + "px";
