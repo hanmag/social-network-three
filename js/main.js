@@ -92,7 +92,7 @@
         particalSystem = new ParticalSystem(group2);
 
         // panelGalaxy
-        panelGalaxy = new PanelGalaxy(container, camera);
+        panelGalaxy = new PanelGalaxy(container, camera, heroes);
 
         // webgl renderer
         webglRenderer = new THREE.WebGLRenderer({
