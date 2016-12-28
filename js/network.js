@@ -115,13 +115,9 @@ Globe = function (webglGroup, cssGroup, camera, raycaster) {
     // 相机位置与旋转
     var camera_r = camera.position.length();
     var rotation = {
-            x: 0,
-            y: 0
-        },
-        target = {
-            x: Math.PI * 3 / 2,
-            y: 0
-        };
+        x: 0,
+        y: 0
+    };
 
     var INTERSECTED = null,
         CURSELECTED = null,
@@ -262,22 +258,10 @@ Globe = function (webglGroup, cssGroup, camera, raycaster) {
             FIXED = [];
         }
 
-        if (CURSELECTED !== null) {
-            particleColors[CURSELECTED * 3] = 2;
-            particleColors[CURSELECTED * 3 + 1] = 2;
-            particleColors[CURSELECTED * 3 + 2] = 2;
-        }
-
         CURSELECTED = INTERSECTED;
-
-        if (CURSELECTED !== null) {
-            particleColors[CURSELECTED * 3] = 2;
-            particleColors[CURSELECTED * 3 + 1] = 2;
-            particleColors[CURSELECTED * 3 + 2] = 0;
-        }
     }
 
-    function update() {
+    function update(target) {
         if (pointCloud === undefined) return;
 
         var intersects = raycaster.intersectObject(pointCloud);
@@ -289,8 +273,8 @@ Globe = function (webglGroup, cssGroup, camera, raycaster) {
                     particleColors[INTERSECTED * 3 + 2] = 2;
                 }
                 INTERSECTED = intersects[0].index;
-                particleColors[INTERSECTED * 3] = 255;
-                particleColors[INTERSECTED * 3 + 1] = 255;
+                particleColors[INTERSECTED * 3] = 2;
+                particleColors[INTERSECTED * 3 + 1] = 2;
                 particleColors[INTERSECTED * 3 + 2] = 0;
             }
         } else {
@@ -302,13 +286,13 @@ Globe = function (webglGroup, cssGroup, camera, raycaster) {
             INTERSECTED = null;
         }
 
-        computeForce();
+        renderPoints();
         renderLines();
         renderMarkers();
 
         ps.Update();
 
-        moveCamera();
+        moveCamera(target);
 
         pointCloud.geometry.attributes.position.needsUpdate = true;
         pointCloud.geometry.attributes.scale.needsUpdate = true;
@@ -317,7 +301,7 @@ Globe = function (webglGroup, cssGroup, camera, raycaster) {
         linesMesh.geometry.attributes.color.needsUpdate = true;
     }
 
-    function computeForce() {
+    function renderPoints() {
 
         // 清空上一轮计算结果，保留当前速度
         for (var i = 0; i < particlesData.length; i++) {
@@ -379,15 +363,27 @@ Globe = function (webglGroup, cssGroup, camera, raycaster) {
 
         // 计算当前轮的速度和位移
         for (var i = 0; i < particlesData.length; i++) {
-            if (FIXED.indexOf(i) != -1)
-                continue;
 
-            var particleData = particlesData[i];
-            particleData.speed.add(particleData.force.clone().divideScalar(_m));
+            if (FIXED.indexOf(i) != -1) {
+                particleColors[i * 3] = 2;
+                particleColors[i * 3 + 1] = 1.5;
+                particleColors[i * 3 + 2] = 0;
+            } else if (i == CURSELECTED) {
+                particleColors[i * 3] = 2;
+                particleColors[i * 3 + 1] = 2;
+                particleColors[i * 3 + 2] = 0;
+            } else {
+                var particleData = particlesData[i];
+                particleData.speed.add(particleData.force.clone().divideScalar(_m));
 
-            particlePositions[i * 3] += particleData.speed.x;
-            particlePositions[i * 3 + 1] += particleData.speed.y;
-            particlePositions[i * 3 + 2] += particleData.speed.z;
+                particlePositions[i * 3] += particleData.speed.x;
+                particlePositions[i * 3 + 1] += particleData.speed.y;
+                particlePositions[i * 3 + 2] += particleData.speed.z;
+
+                particleColors[i * 3] = 2;
+                particleColors[i * 3 + 1] = 2;
+                particleColors[i * 3 + 2] = 2;
+            }
 
             var p1 = new THREE.Vector3(particlePositions[i * 3], particlePositions[i * 3 + 1], particlePositions[i * 3 + 2]);
             var p2 = camera.position;
@@ -433,9 +429,9 @@ Globe = function (webglGroup, cssGroup, camera, raycaster) {
             numConnected++;
 
             if (CURSELECTED !== null && notSelected && (i === CURSELECTED || j === CURSELECTED)) {
-                if (FIXED.indexOf(i) == -1)
+                if (FIXED.indexOf(i) == -1 && i != CURSELECTED)
                     FIXED.push(i);
-                if (FIXED.indexOf(j) == -1)
+                if (FIXED.indexOf(j) == -1 && j != CURSELECTED)
                     FIXED.push(j);
 
                 var path = new THREE.CatmullRomCurve3([
@@ -474,7 +470,7 @@ Globe = function (webglGroup, cssGroup, camera, raycaster) {
         }
     }
 
-    function moveCamera() {
+    function moveCamera(target) {
         target.x += 0.001;
         rotation.x += (target.x - rotation.x) * 0.1;
         rotation.y += (target.y - rotation.y) * 0.1;
@@ -631,10 +627,30 @@ ParticleSystem = function (group) {
 
     var globe;
 
-    var mouse = {
-        x: -1000,
-        y: -1000
-    };
+    var controller = {
+            x: -1000,
+            y: -1000
+        },
+        mouse = {
+            x: -1000,
+            y: -1000
+        },
+        mouseOnDown = {
+            x: 0,
+            y: 0
+        };
+
+    var target = {
+            x: Math.PI * 3 / 2,
+            y: 0
+        },
+        targetOnDown = {
+            x: 0,
+            y: 0
+        };
+
+    var PI_HALF = Math.PI / 2;
+
     var raycaster;
 
     var container = document.getElementById('threejs-container');
@@ -734,7 +750,7 @@ ParticleSystem = function (group) {
         container.appendChild(cssRenderer.domElement);
 
         // event
-        container.addEventListener('click', globe.Select, false);
+        container.addEventListener("mousedown", onMouseDown, false);
         window.addEventListener('resize', onWindowResize, false);
         document.addEventListener('mousemove', onDocumentMouseMove, false);
     }
@@ -742,6 +758,51 @@ ParticleSystem = function (group) {
     function onDocumentMouseMove(event) {
         mouse.x = (event.clientX / container.offsetWidth) * 2 - 1;
         mouse.y = -(event.clientY / container.offsetHeight) * 2 + 1;
+    }
+
+    function onMouseDown(event) {
+        event.preventDefault();
+
+        container.addEventListener('mousemove', onMouseMove, false);
+        container.addEventListener('mouseup', onMouseUp, false);
+        container.addEventListener('mouseout', onMouseOut, false);
+
+        mouseOnDown.x = -event.clientX;
+        mouseOnDown.y = event.clientY;
+
+        controller.x = -event.clientX;
+        controller.y = event.clientY;
+
+        targetOnDown.x = target.x;
+        targetOnDown.y = target.y;
+    }
+
+    function onMouseMove(event) {
+        event.preventDefault();
+
+        controller.x = -event.clientX;
+        controller.y = event.clientY;
+
+        target.x = targetOnDown.x + (controller.x - mouseOnDown.x) * 0.005;
+        target.y = targetOnDown.y + (controller.y - mouseOnDown.y) * 0.005;
+
+        target.y = target.y > PI_HALF ? PI_HALF : target.y;
+        target.y = target.y < -PI_HALF ? -PI_HALF : target.y;
+    }
+
+    function onMouseUp(event) {
+        if (Math.abs(mouseOnDown.x - controller.x) < 1 && Math.abs(mouseOnDown.y - controller.y) < 1)
+            globe.Select();
+
+        container.removeEventListener('mousemove', onMouseMove, false);
+        container.removeEventListener('mouseup', onMouseUp, false);
+        container.removeEventListener('mouseout', onMouseOut, false);
+    }
+
+    function onMouseOut(event) {
+        container.removeEventListener('mousemove', onMouseMove, false);
+        container.removeEventListener('mouseup', onMouseUp, false);
+        container.removeEventListener('mouseout', onMouseOut, false);
     }
 
     function onWindowResize() {
@@ -762,7 +823,7 @@ ParticleSystem = function (group) {
 
     function render() {
 
-        globe.Update();
+        globe.Update(target);
 
         cssRenderer.render(cssScene, camera);
         webglRenderer.render(webglScene, camera);
