@@ -1,7 +1,3 @@
-/**
- * 
- * @author wangjue / https://github.com/hanmag
- */
 
 var NETWORK = NETWORK || {};
 
@@ -12,7 +8,10 @@ var NETWORK = NETWORK || {};
             value: new THREE.Color(0xffffff)
         },
         texture: {
-            value: new THREE.TextureLoader().load("images/sprites/spark1.png")
+            value: new THREE.TextureLoader().load("../css/images/spark1.png")
+        },
+        texture2: {
+            value: new THREE.TextureLoader().load("../css/images/spark2.png")
         }
     };
 
@@ -21,7 +20,7 @@ var NETWORK = NETWORK || {};
             value: new THREE.Color(0xffffff)
         },
         texture: {
-            value: new THREE.TextureLoader().load("images/sprites/particleA.png")
+            value: new THREE.TextureLoader().load("../css/images/particleA.png")
         }
     };
 
@@ -30,24 +29,33 @@ var NETWORK = NETWORK || {};
             'attribute float size;',
             'attribute float scale;',
             'attribute vec3 customColor;',
+            'attribute float importance;',
             'varying vec3 vColor;',
             'varying float opacity;',
+            'varying float type;',
             'void main() {',
             'vColor = customColor;',
             'vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );',
             'gl_PointSize = size * scale;',
             'gl_Position = projectionMatrix * mvPosition;',
-            'opacity = scale;',
+            'opacity = scale * 1.1;',
+            'type = importance;',
             '}'
         ].join('\n'),
         fragmentShader: [
             'uniform vec3 color;',
             'uniform sampler2D texture;',
+            'uniform sampler2D texture2;',
             'varying vec3 vColor;',
             'varying float opacity;',
+            'varying float type;',
             'void main() {',
             'gl_FragColor = vec4( color * vColor, opacity);',
+            'if(type>0.0)',
             'gl_FragColor = gl_FragColor * texture2D( texture, gl_PointCoord );',
+            'else',
+            'gl_FragColor = gl_FragColor * texture2D( texture2, gl_PointCoord );',
+            'if(opacity<0.2) discard;',
             '}'
         ].join('\n')
     };
@@ -87,14 +95,14 @@ var NETWORK = NETWORK || {};
     NETWORK.Materials = materials;
 })();
 
-NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
+NETWORK.Globe = function (webglGroup, cssGroup, camera, raycaster, target) {
 
     // 数据
     var nodes, edges;
     var objects = {};
 
     // 粒子系统
-    var particlePositions, particleColors, particleSizes, particleScales;
+    var particlePositions, particleColors, particleSizes, particleScales, particleImportances;
     var pointCloud;
     var particlesData = [];
 
@@ -105,12 +113,13 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
     // 球直径、半径
     var _r2 = 800;
     var _r = _r2 / 2;
+    var PI_HALF = Math.PI / 2;
 
     // 弹性系数，基础质量，临界长度, 摩擦系数
-    var _k = 0.06,
-        _m = 100,
+    var _k = 0.15,
+        _m = 200,
         _l = 50,
-        _f = 0.08;
+        _f = 0.15;
 
     // 相机位置与旋转
     var camera_r = camera.position.length();
@@ -123,11 +132,7 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         CURSELECTED = null,
         FIXED = [];
 
-    var particleGroup = new THREE.Group();
-    webglGroup.add(particleGroup);
-    var ps = new NETWORK.ParticleSystem(particleGroup);
-
-    var fp;
+    var ps, fp, particleGroup, floatGroup;
 
     function clear() {
         var cs = [];
@@ -140,12 +145,18 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         }, this);
 
         cs = [];
-        particleGroup.children.forEach(function (child) {
-            cs.push(child);
+        cssGroup.children.forEach(function (child) {
+            if (child !== floatGroup)
+                cs.push(child);
         }, this);
         cs.forEach(function (child) {
-            particleGroup.remove(child);
+            cssGroup.remove(child);
         }, this);
+
+        if (ps !== undefined)
+            ps.Clear();
+        if (fp !== undefined)
+            fp.Clear();
 
         if (pointCloud !== undefined) {
             pointCloud.geometry.setDrawRange(0, 0);
@@ -160,10 +171,43 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         nodes = heroes;
         edges = relations;
 
+        particleGroup = new THREE.Group();
+        webglGroup.add(particleGroup);
+        ps = new NETWORK.ParticleSystem(particleGroup);
+        floatGroup = new THREE.Group();
+        cssGroup.add(floatGroup);
+        fp = new NETWORK.FloatPanel(floatGroup, camera, heroes);
+
         initData(nodes, edges);
 
-        fp = new NETWORK.FloatPanel(container, camera, nodes);
+        initScene();
+    }
 
+    function initData(nodes, edges) {
+        for (var i = 0; i < nodes.length; i++) {
+            nodes[i].numConnections = 0;
+            nodes[i].index = i;
+            objects[nodes[i].id] = nodes[i];
+
+            //marker
+            var element = document.createElement("div");
+            element.className = "element";
+            element.innerHTML = nodes[i].name;
+
+            var cssObject = new THREE.CSS3DObject(element);
+            cssObject.anchor = new THREE.Vector3(0, 0, 0);
+            nodes[i].marker = cssObject;
+            cssGroup.add(cssObject);
+        }
+
+        edges.forEach(function (element) {
+            objects[element.source].numConnections++;
+            objects[element.target].numConnections++;
+            element.type = element.isTarget ? 1 : 2;
+        }, this);
+    }
+
+    function initScene() {
         // all nodes count
         var particalCount = nodes.length;
         // all possible segments count
@@ -174,9 +218,10 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         particleColors = new Float32Array(particalCount * 3);
         particleSizes = new Float32Array(particalCount);
         particleScales = new Float32Array(particalCount);
+        particleImportances = new Float32Array(particalCount);
 
         var color = new THREE.Color(0xffffff);
-        var size = 50.0;
+        var size = 30.0;
 
         for (var i = 0; i < particalCount; i++) {
             // position
@@ -185,13 +230,14 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
             particlePositions[i * 3 + 2] = Math.random() * _r2 - _r;
 
             // color
-            particleColors[i * 3] = color.r * 2;
-            particleColors[i * 3 + 1] = color.g * 2;
-            particleColors[i * 3 + 2] = color.b * 2;
+            particleColors[i * 3] = 0.6;
+            particleColors[i * 3 + 1] = 1.2;
+            particleColors[i * 3 + 2] = 1.25;
 
             // size
             particleSizes[i] = size;
             particleScales[i] = 1.0;
+            particleImportances[i] = nodes[i].isTarget ? 1 : -1;
 
             // extra attributes
             particlesData.push({
@@ -203,9 +249,10 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
 
         //add Attribute
         particles.addAttribute('position', new THREE.BufferAttribute(particlePositions, 3).setDynamic(true));
-        particles.addAttribute('customColor', new THREE.BufferAttribute(particleColors, 3));
+        particles.addAttribute('customColor', new THREE.BufferAttribute(particleColors, 3).setDynamic(true));
         particles.addAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
         particles.addAttribute('scale', new THREE.BufferAttribute(particleScales, 1).setDynamic(true));
+        particles.addAttribute('importance', new THREE.BufferAttribute(particleImportances, 1));
         particles.setDrawRange(0, particalCount);
         particles.computeBoundingSphere();
 
@@ -227,28 +274,6 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         webglGroup.add(linesMesh);
     }
 
-    function initData(nodes, edges) {
-        for (var i = 0; i < nodes.length; i++) {
-            nodes[i].numConnections = 0;
-            nodes[i].index = i;
-            objects[nodes[i].id] = nodes[i];
-
-            //marker
-            var element = document.createElement("div");
-            element.className = "element";
-            element.innerHTML = nodes[i].name;
-
-            var cssObject = new THREE.CSS3DObject(element);
-            nodes[i].marker = cssObject;
-            cssGroup.add(cssObject);
-        }
-
-        edges.forEach(function (element) {
-            objects[element.from].numConnections++;
-            objects[element.to].numConnections++;
-        }, this);
-    }
-
     function select() {
         if (CURSELECTED !== INTERSECTED) {
             var cs = [];
@@ -262,19 +287,29 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
             FIXED = [];
         }
 
+        if (CURSELECTED != null) {
+            particleColors[CURSELECTED * 3] = 0.6;
+            particleColors[CURSELECTED * 3 + 1] = 1.2;
+            particleColors[CURSELECTED * 3 + 2] = 1.25;
+
+            fp.Clear();
+        }
+
         CURSELECTED = INTERSECTED;
+
+        locate(CURSELECTED);
     }
 
-    function update(target) {
+    function update() {
         if (pointCloud === undefined) return;
 
         var intersects = raycaster.intersectObject(pointCloud);
         if (intersects.length > 0) {
             if (INTERSECTED != intersects[0].index) {
                 if (INTERSECTED !== null && CURSELECTED !== INTERSECTED) {
-                    particleColors[INTERSECTED * 3] = 2;
-                    particleColors[INTERSECTED * 3 + 1] = 2;
-                    particleColors[INTERSECTED * 3 + 2] = 2;
+                    particleColors[INTERSECTED * 3] = 0.6;
+                    particleColors[INTERSECTED * 3 + 1] = 1.2;
+                    particleColors[INTERSECTED * 3 + 2] = 1.25;
                 }
                 INTERSECTED = intersects[0].index;
                 particleColors[INTERSECTED * 3] = 2;
@@ -283,9 +318,9 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
             }
         } else {
             if (CURSELECTED !== INTERSECTED) {
-                particleColors[INTERSECTED * 3] = 2;
-                particleColors[INTERSECTED * 3 + 1] = 2;
-                particleColors[INTERSECTED * 3 + 2] = 2;
+                particleColors[INTERSECTED * 3] = 0.6;
+                particleColors[INTERSECTED * 3 + 1] = 1.2;
+                particleColors[INTERSECTED * 3 + 2] = 1.25;
             }
             INTERSECTED = null;
         }
@@ -297,11 +332,11 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         ps.Update();
         fp.Update();
 
-        moveCamera(target);
+        moveCamera();
 
         pointCloud.geometry.attributes.position.needsUpdate = true;
-        pointCloud.geometry.attributes.scale.needsUpdate = true;
         pointCloud.geometry.attributes.customColor.needsUpdate = true;
+        pointCloud.geometry.attributes.scale.needsUpdate = true;
         linesMesh.geometry.attributes.position.needsUpdate = true;
         linesMesh.geometry.attributes.color.needsUpdate = true;
     }
@@ -317,7 +352,7 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
             particlesData[i].force = new THREE.Vector3(0, 0, 0);
 
             // 计算阻力，速度很慢时不考虑
-            if (particleData.speed.length() > 0.2)
+            if (particleData.speed.length() > 1)
                 particleData.force.add(particleData.speed.clone().normalize().multiplyScalar(-1 * _f * _m));
         }
 
@@ -330,8 +365,13 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
             var dist = Math.sqrt(ax * ax + ay * ay + az * az);
 
             // 计算中心点的弹力
-            var elastic = (dist - _r) * _k * 10;
+            var elastic = (dist - _r) * _k * 20;
             particleDataA.force.add(new THREE.Vector3(-ax, -ay, -az).normalize().multiplyScalar(elastic));
+
+            // 不得超出球面太远
+            if (dist > 1.2 * _r) {
+                particleDataA.speed.set(0, 0, 0);
+            }
 
             // 计算所有节点之间的默认斥力
             for (var j = i + 1; j < particlesData.length; j++) {
@@ -340,7 +380,7 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
                 var dy = ay - particlePositions[j * 3 + 1];
                 var dz = az - particlePositions[j * 3 + 2];
                 var distp = dx * dx + dy * dy + dz * dz;
-                var push = 10 / distp;
+                var push = 50000 / distp;
                 particleDataA.force.add(new THREE.Vector3(dx, dy, dz).normalize().multiplyScalar(push));
                 particleDataB.force.add(new THREE.Vector3(-dx, -dy, -dz).normalize().multiplyScalar(push));
             }
@@ -349,8 +389,8 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         // 计算节点间边的弹力
         for (var k = 0; k < edges.length; k++) {
             var lineData = edges[k];
-            var i = objects[lineData.from].index;
-            var j = objects[lineData.to].index;
+            var i = objects[lineData.source].index;
+            var j = objects[lineData.target].index;
 
             var dx = particlePositions[i * 3] - particlePositions[j * 3];
             var dy = particlePositions[i * 3 + 1] - particlePositions[j * 3 + 1];
@@ -370,19 +410,13 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
 
         // 计算当前轮的速度、位移和样式
         for (var i = 0; i < particlesData.length; i++) {
-
+            var scale_rate = 1.2;
             if (FIXED.indexOf(i) != -1) {
-                particleColors[i * 3] = 2;
-                particleColors[i * 3 + 1] = 1.5;
-                particleColors[i * 3 + 2] = 0;
-
                 selectedNodes.push(nodes[i]);
+                scale_rate = 1.5;
             } else if (i == CURSELECTED) {
-                particleColors[i * 3] = 2;
-                particleColors[i * 3 + 1] = 2;
-                particleColors[i * 3 + 2] = 0;
-
                 selectedNodes.push(nodes[i]);
+                scale_rate = 1.8;
             } else {
                 var particleData = particlesData[i];
                 particleData.speed.add(particleData.force.clone().divideScalar(_m));
@@ -391,20 +425,20 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
                 particlePositions[i * 3 + 1] += particleData.speed.y;
                 particlePositions[i * 3 + 2] += particleData.speed.z;
 
-                particleColors[i * 3] = 2;
-                particleColors[i * 3 + 1] = 2;
-                particleColors[i * 3 + 2] = 2;
+                if (CURSELECTED !== null)
+                    scale_rate = 0.75;
             }
 
             var p1 = new THREE.Vector3(particlePositions[i * 3], particlePositions[i * 3 + 1], particlePositions[i * 3 + 2]);
             var p2 = camera.position;
             var dist = p1.sub(p2).length();
 
-            particleScales[i] = 1.3 * _r2 * _r2 / dist / dist;
+            particleScales[i] = scale_rate * _r2 * _r2 / dist / dist;
         }
 
         // float panels
-        fp.Select(selectedNodes);
+        if (selectedNodes.length > 0)
+            fp.Select(selectedNodes);
     }
 
     function renderLines() {
@@ -417,30 +451,21 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         for (var k = 0; k < edges.length; k++) {
             var lineData = edges[k];
             var dist = lineData.distance;
-            var i = objects[lineData.from].index;
-            var j = objects[lineData.to].index;
+            var i = objects[lineData.source].index;
+            var j = objects[lineData.target].index;
 
-            var alpha = (dist > 300) ? 0.01 : (0.1 - dist / 3000);
-            alpha *= (particleScales[i] + particleScales[j]) / 2;
-            if (alpha < 0.01) continue;
+            var color_r = 0.25 * 1.42;
+            var color_g = 0.25 * 2.44;
+            var color_b = 0.25 * 1.76;
 
-            linePositions[vertexpos++] = particlePositions[i * 3];
-            linePositions[vertexpos++] = particlePositions[i * 3 + 1];
-            linePositions[vertexpos++] = particlePositions[i * 3 + 2];
+            if (lineData.type != 1) {
+                color_r = 0.25 * 2.49;
+                color_g = 0.25 * 0.88;
+                color_b = 0.25 * 0.79;
+            }
 
-            linePositions[vertexpos++] = particlePositions[j * 3];
-            linePositions[vertexpos++] = particlePositions[j * 3 + 1];
-            linePositions[vertexpos++] = particlePositions[j * 3 + 2];
-
-            lineColors[colorpos++] = alpha;
-            lineColors[colorpos++] = alpha;
-            lineColors[colorpos++] = alpha;
-
-            lineColors[colorpos++] = alpha;
-            lineColors[colorpos++] = alpha;
-            lineColors[colorpos++] = alpha;
-
-            numConnected++;
+            var p1 = new THREE.Vector3(particlePositions[i * 3], particlePositions[i * 3 + 1], particlePositions[i * 3 + 2]);
+            var p2 = new THREE.Vector3(particlePositions[j * 3], particlePositions[j * 3 + 1], particlePositions[j * 3 + 2]);
 
             if (CURSELECTED !== null && notSelected && (i === CURSELECTED || j === CURSELECTED)) {
                 if (FIXED.indexOf(i) == -1 && i != CURSELECTED)
@@ -448,16 +473,58 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
                 if (FIXED.indexOf(j) == -1 && j != CURSELECTED)
                     FIXED.push(j);
 
-                var path = new THREE.CatmullRomCurve3([
-                    new THREE.Vector3(particlePositions[i * 3], particlePositions[i * 3 + 1], particlePositions[i * 3 + 2]),
-                    new THREE.Vector3(particlePositions[j * 3], particlePositions[j * 3 + 1], particlePositions[j * 3 + 2])
-                ]);
-                var spGeometry = new THREE.TubeGeometry(path, 1, 2, 4, false);
-                var spLine = new THREE.Mesh(spGeometry, NETWORK.Materials.SpecialLine);
+                var points, spGeometry;
+                var normal = (new THREE.Vector3()).subVectors(p1, p2);
+                var pDistance = normal.length();
+                if (pDistance < _r / 2) {
+                    var path = new THREE.CatmullRomCurve3([p1, p2]);
+                    points = path.points;
+                    spGeometry = new THREE.TubeGeometry(path, 1, 8, 8, false);
+                }
+                else {
+                    var mid = p1.clone().lerp(p2, 0.5);
+                    var midLength = mid.length();
+                    mid.normalize();
+                    mid.multiplyScalar(midLength + pDistance * 0.5);
+                    normal.normalize();
+                    var midStart = mid.clone().add(normal.clone().multiplyScalar(pDistance / 2));
+                    var midEnd = mid.clone().add(normal.clone().multiplyScalar(-pDistance / 2));
+                    var curveA = new THREE.CubicBezierCurve3(p1, p1, midStart, mid);
+                    var curveB = new THREE.CubicBezierCurve3(mid, midEnd, p2, p2);
+                    var points = curveA.getPoints(8);
+                    points = points.splice(0, points.length - 1);
+                    points = points.concat(curveB.getPoints(8));
+                    spGeometry = new THREE.CurvePath().createGeometry(points);
+                }
+
+                var meterial = NETWORK.Materials.SpecialLine.clone();
+                meterial.color = new THREE.Color(color_r, color_g, color_b);
+                var spLine = new THREE.Mesh(spGeometry, meterial);
                 particleGroup.add(spLine);
 
-                pointsArray.push(path.points);
+                pointsArray.push({ "points": points, "colors": [color_r, color_g, color_b] });
             }
+
+            var alpha = (dist > 600) ? 0.1 : (0.28 - dist / 6000);
+            alpha *= (particleScales[i] + particleScales[j]) / 2;
+            if (alpha < 0.12) continue;
+
+            linePositions[vertexpos++] = p1.x;
+            linePositions[vertexpos++] = p1.y;
+            linePositions[vertexpos++] = p1.z;
+
+            linePositions[vertexpos++] = p2.x;
+            linePositions[vertexpos++] = p2.y;
+            linePositions[vertexpos++] = p2.z;
+
+            lineColors[colorpos++] = 4 * alpha * color_r;
+            lineColors[colorpos++] = 4 * alpha * color_g;
+            lineColors[colorpos++] = 4 * alpha * color_b;
+            lineColors[colorpos++] = 4 * alpha * color_r;
+            lineColors[colorpos++] = 4 * alpha * color_g;
+            lineColors[colorpos++] = 4 * alpha * color_b;
+
+            numConnected++;
         }
 
         // special lines
@@ -465,27 +532,29 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
             ps.Init(pointsArray);
         }
 
-
         linesMesh.geometry.setDrawRange(0, numConnected * 2);
     }
 
     function renderMarkers() {
+        var seeableScale = 1200 / camera_r;
         // marker, relative position and opacity
         for (var i = 0; i < nodes.length; i++) {
             var marker = nodes[i].marker;
             marker.element.style.opacity = particleScales[i];
-            marker.element.style.visibility = (particleScales[i] < 0.65) ? "hidden" : "visible";
+            marker.element.style.visibility = (particleScales[i] < seeableScale) ? "hidden" : "visible";
 
             marker.position.x = particlePositions[i * 3];
-            marker.position.y = particlePositions[i * 3 + 1] - (5 + particleSizes[i] / 4);
+            marker.position.y = particlePositions[i * 3 + 1] - (5 + particleSizes[i]);
             marker.position.z = particlePositions[i * 3 + 2];
+            marker.anchor.set(particlePositions[i * 3], particlePositions[i * 3 + 1], particlePositions[i * 3 + 2]);
 
             marker.lookAt(camera.position);
         }
     }
 
-    function moveCamera(target) {
-        target.x += 0.001;
+    function moveCamera() {
+        if (INTERSECTED == null && CURSELECTED == null)
+            target.x += 0.01;
         rotation.x += (target.x - rotation.x) * 0.1;
         rotation.y += (target.y - rotation.y) * 0.1;
 
@@ -495,15 +564,46 @@ NETWORK.Globe = function (container, webglGroup, cssGroup, camera, raycaster) {
         camera.lookAt(new THREE.Vector3(0, 0, 0));
     }
 
+    function locate(targetId) {
+        if (targetId === null || targetId === undefined)
+            return;
+
+        var p = new THREE.Vector3(particlePositions[targetId * 3], particlePositions[targetId * 3 + 1], particlePositions[targetId * 3 + 2]);
+        p.normalize();
+
+        var y = Math.asin(p.y);
+        var x = Math.atan(p.x / p.z);
+
+        console.log(target.x, target.y, x, y);
+        if (target.x < 0)
+            x += Math.PI;
+        if (x < 0 || y < 0)
+            x += Math.PI;
+
+        target.x = x;
+        target.y = y;
+
+
+    }
+
+    function handleWheel(delta) {
+        camera_r -= delta * 10;
+        if (camera_r > 1400)
+            camera_r = 1400;
+        if (camera_r < 1200)
+            camera_r = 1200;
+    }
+
     return {
         Init: init,
         Select: select,
-        Update: update
+        Update: update,
+        HandleWheel: handleWheel
     };
 };
 
 /**
- * 用于显示选中线上的粒子效果，输入各条边的所有节点
+ * 用于显示选中线上的粒子效果，输入各条边的节点和颜色
  */
 NETWORK.ParticleSystem = function (group) {
 
@@ -532,34 +632,36 @@ NETWORK.ParticleSystem = function (group) {
 
         // 插值
         pointsArray.forEach(function (element) {
-            if (element.length != 2) return;
+            if (element.points.length < 2) return;
 
-            var dx = element[1].x - element[0].x;
-            var dy = element[1].y - element[0].y;
-            var dz = element[1].z - element[0].z;
-            var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            for (var k = 0; k < element.points.length - 1; k++) {
+                var dx = element.points[k + 1].x - element.points[k].x;
+                var dy = element.points[k + 1].y - element.points[k].y;
+                var dz = element.points[k + 1].z - element.points[k].z;
+                var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-            var insertCount = Math.floor(dist / 20);
-            points.push(element[0].clone());
-            for (var i = 0; i < insertCount; i++) {
-                var x = element[0].x + (i + 1) * (dx / (insertCount + 1));
-                var y = element[0].y + (i + 1) * (dy / (insertCount + 1));
-                var z = element[0].z + (i + 1) * (dz / (insertCount + 1));
+                var insertCount = Math.floor(dist / 20);
+                points.push({ "position": element.points[k].clone(), "colors": element.colors });
+                for (var i = 0; i < insertCount; i++) {
+                    var x = element.points[k].x + (i + 1) * (dx / (insertCount + 1));
+                    var y = element.points[k].y + (i + 1) * (dy / (insertCount + 1));
+                    var z = element.points[k].z + (i + 1) * (dz / (insertCount + 1));
 
-                points.push(new THREE.Vector3(x, y, z));
+                    points.push({ "position": new THREE.Vector3(x, y, z), "colors": element.colors });
+                    currentIndex++;
+                    pathLink.push(currentIndex);
+                }
+
+                points.push({ "position": element.points[k + 1].clone(), "colors": element.colors });
                 currentIndex++;
                 pathLink.push(currentIndex);
+
+                currentIndex++;
+                pathLink.push(pathStartIndex);
+                pathStartIndex = currentIndex;
+
+                particalCount += insertCount + 2;
             }
-
-            points.push(element[1].clone());
-            currentIndex++;
-            pathLink.push(currentIndex);
-
-            currentIndex++;
-            pathLink.push(pathStartIndex);
-            pathStartIndex = currentIndex;
-
-            particalCount += insertCount + 2;
         }, this);
 
         var particles = new THREE.BufferGeometry();
@@ -569,21 +671,21 @@ NETWORK.ParticleSystem = function (group) {
         particleScales = new Float32Array(particalCount);
 
         for (var i = 0; i < particalCount; i++) {
-            particlePositions[i * 3] = points[i].x;
-            particlePositions[i * 3 + 1] = points[i].y;
-            particlePositions[i * 3 + 2] = points[i].z;
+            particlePositions[i * 3] = points[i].position.x;
+            particlePositions[i * 3 + 1] = points[i].position.y;
+            particlePositions[i * 3 + 2] = points[i].position.z;
 
-            particleColors[i * 3] = 1;
-            particleColors[i * 3 + 1] = 1;
-            particleColors[i * 3 + 2] = 1;
+            particleColors[i * 3] = points[i].colors[0];
+            particleColors[i * 3 + 1] = points[i].colors[1];
+            particleColors[i * 3 + 2] = points[i].colors[2];
 
-            particleSizes[i] = 20.0;
+            particleSizes[i] = 10.0;
             particleScales[i] = 1.0;
         }
 
         particles.addAttribute('position', new THREE.BufferAttribute(particlePositions, 3).setDynamic(true));
-        particles.addAttribute('customColor', new THREE.BufferAttribute(particleColors, 3).setDynamic(true));
-        particles.addAttribute('size', new THREE.BufferAttribute(particleSizes, 1).setDynamic(true));
+        particles.addAttribute('customColor', new THREE.BufferAttribute(particleColors, 3));
+        particles.addAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
         particles.addAttribute('scale', new THREE.BufferAttribute(particleScales, 1).setDynamic(true));
         particles.computeBoundingSphere();
         particles.setDrawRange(0, particalCount);
@@ -595,29 +697,24 @@ NETWORK.ParticleSystem = function (group) {
     function update() {
         if (group.children.length === 0 || particleSystem === undefined) return;
 
-        lerpN += 0.05;
+        lerpN += 0.15;
         if (lerpN > 1)
             lerpN = 0;
 
         for (var i = 0; i < particalCount; i++) {
-            var currentPoint = points[i].clone();
+            var currentPoint = points[i].position.clone();
             if (pathLink[i] > i)
-                currentPoint.lerp(points[pathLink[i]], lerpN);
+                currentPoint.lerp(points[pathLink[i]].position, lerpN);
 
             particlePositions[i * 3] = currentPoint.x;
             particlePositions[i * 3 + 1] = currentPoint.y;
             particlePositions[i * 3 + 2] = currentPoint.z;
 
-            particleColors[i * 3] = 2;
-            particleColors[i * 3 + 1] = 2;
-            particleColors[i * 3 + 2] = 0;
-
-            particleSizes[i] = 10.0;
+            particleScales[i] = 1.5;
         }
 
         particleSystem.geometry.attributes.position.needsUpdate = true;
-        particleSystem.geometry.attributes.customColor.needsUpdate = true;
-        particleSystem.geometry.attributes.size.needsUpdate = true;
+        particleSystem.geometry.attributes.scale.needsUpdate = true;
     }
 
     return {
@@ -630,9 +727,8 @@ NETWORK.ParticleSystem = function (group) {
 /**
  * 外层悬浮面板布局
  */
-NETWORK.FloatPanel = function (container, mainCamera, heroes) {
+NETWORK.FloatPanel = function (group, camera, heroes) {
 
-    var camera, scene, renderer, group1, group2;
     var targets;
     var freeTime = 0;
 
@@ -641,36 +737,15 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
     var tmpVec3 = new THREE.Vector3();
     var tmpVec4 = new THREE.Vector3();
 
-    scene = new THREE.Scene();
-    group1 = new THREE.Group();
-    group2 = new THREE.Group();
-    scene.add(group1);
-    scene.add(group2);
-    camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 1, 4000);
-    camera.position.z = 1200;
-
-    renderer = new THREE.CSS3DRenderer();
-    renderer.setSize(container.offsetWidth, container.offsetHeight);
-    renderer.domElement.style.position = 'absolute';
-    renderer.domElement.style.top = 0;
-    container.appendChild(renderer.domElement);
-
     function clear() {
         freeTime = 0;
         targets = [];
         var cs = [];
-        group1.children.forEach(function (child) {
+        group.children.forEach(function (child) {
             cs.push(child);
         }, this);
         cs.forEach(function (child) {
-            group1.remove(child);
-        }, this);
-        cs = [];
-        group2.children.forEach(function (child) {
-            cs.push(child);
-        }, this);
-        cs.forEach(function (child) {
-            group2.remove(child);
+            group.remove(child);
         }, this);
     }
 
@@ -682,7 +757,7 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
             element.className = "panel";
 
             var img = document.createElement("img");
-            img.src = "images/th.jpg";
+            img.src = "../css/images/th.jpg";
             element.appendChild(img);
 
             var span = document.createElement("span");
@@ -690,19 +765,20 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
             element.appendChild(span);
 
             var cssObject = new THREE.CSS3DObject(element);
-            group1.add(cssObject);
+            group.add(cssObject);
 
             var bond = document.createElement('div');
-            bond.className = "bond";
+            bond.className = "bond2";
             bond.style.height = "1px";
 
             var object2 = new THREE.CSS3DObject(bond);
-            group2.add(object2);
+            group.add(object2);
 
             targets.push({
-                point: e.marker.position,
+                point: e.marker.anchor,
                 object: cssObject,
-                bond: object2
+                bond: object2,
+                isTarget: e.isTarget
             });
         }, this);
     }
@@ -717,36 +793,62 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
         if (targets === undefined || targets.length == 0) {
             freeTime++;
 
-            if (freeTime > 500) {
-                var index = Math.floor(heroes.length * Math.random()) % heroes.length;
-                var index2 = Math.floor(heroes.length * Math.random()) % heroes.length;
-                select([heroes[index], heroes[index2]]);
+            if (freeTime > 100) {
+                var n = Math.floor(Math.random() * 5 + 4);
+                var arrays = [];
+                for (var i = 0; i < n; i++) {
+                    var index = Math.floor(heroes.length * Math.random()) % heroes.length;
+                    arrays.push(heroes[index]);
+                }
+                select(arrays);
 
-                freeTime = -250;
+                freeTime = -200;
             }
             return;
         }
+
         targets.forEach(function (element) {
             var point = element.point.clone();
-            point.project(mainCamera);
+            var len = point.length();
+            var dis = point.clone().sub(camera.position).length();
+            var projectP = point.clone().normalize().multiplyScalar(len + (dis * 0.2));
 
             var cssObject = element.object;
-            cssObject.position.x = (point.x < 0) ? (-400 + 400 * point.x) : (400 + 400 * point.x);
-            cssObject.position.y = 800 * point.y;
-            if (cssObject.position.y > 320) cssObject.position.y = 320;
-            else if (cssObject.position.y < -320) cssObject.position.y = -320;
-            cssObject.position.z = 0.0;
+            cssObject.position.x = projectP.x;
+            // if (cssObject.position.x > 500) cssObject.position.x = 500;
+            // else if (cssObject.position.x < -500) cssObject.position.x = -500;
+            cssObject.position.y = projectP.y;
+            // if (cssObject.position.y > 300) cssObject.position.y = 300;
+            // else if (cssObject.position.y < -300) cssObject.position.y = -300;
+            cssObject.position.z = projectP.z;
             cssObject.lookAt(camera.position);
 
             var object2 = element.bond;
-            var end = new THREE.Vector3(point.x * 600, point.y * 600, -10);
-            var start = new THREE.Vector3(cssObject.position.x, cssObject.position.y, -50);
-            tmpVec1.subVectors(start, end);
-            var bondLength = tmpVec1.length() - 100;
-            object2.element.style.height = bondLength + "px";
+            var end = new THREE.Vector3(point.x, point.y, point.z);
+            var start = new THREE.Vector3(cssObject.position.x, cssObject.position.y, cssObject.position.z - 10);
 
+            tmpVec1.subVectors(start, end);
+            var bondLength = tmpVec1.length() - 5;
+            object2.element.style.height = bondLength + "px";
             object2.position.copy(start);
             object2.position.lerp(end, 0.5);
+
+            if (dis > 1200) {
+                cssObject.element.style.opacity = 0.5;
+                object2.element.style.opacity = 0.3;
+            }
+            else {
+                cssObject.element.style.opacity = 1.0;
+                object2.element.style.opacity = 0.6;
+            }
+
+            if (element.isTarget) {
+                cssObject.element.className = "important";
+                object2.element.className = "bond1"
+            } else {
+                cssObject.element.className = "panel";
+                object2.element.className = "bond2"
+            }
 
             var axis = tmpVec2.set(0, 1, 0).cross(tmpVec1);
             var radians = Math.acos(tmpVec3.set(0, 1, 0).dot(tmpVec4.copy(tmpVec1).normalize()));
@@ -758,8 +860,6 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
             object2.matrixAutoUpdate = false;
             object2.updateMatrix();
         }, this);
-
-        renderer.render(scene, camera);
     }
 
     return {
@@ -777,16 +877,16 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
 
     var camera;
 
-    var history, allHeroes, heroes, relations;
+    var history, heroes, relations;
 
     var currentYear = "165";
 
     var globe;
 
     var controller = {
-            x: -1000,
-            y: -1000
-        },
+        x: -1000,
+        y: -1000
+    },
         mouse = {
             x: -1000,
             y: -1000
@@ -797,9 +897,9 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
         };
 
     var target = {
-            x: Math.PI * 3 / 2,
-            y: 0
-        },
+        x: Math.PI * 3 / 2,
+        y: 0
+    },
         targetOnDown = {
             x: 0,
             y: 0
@@ -813,19 +913,13 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
 
     if (!Detector.webgl) Detector.addGetWebGLMessage();
 
-    loadData("data/history.json", function (json1) {
+    loadData(servers + "telConn", function (json1) {
 
         history = json1;
-        loadData("data/heroes.json", function (json2) {
 
-            allHeroes = json2;
-
-            preprocess();
-            initScene();
-            animate();
-        }, function (error2) {
-            console.error(error2);
-        });
+        preprocess();
+        initScene();
+        animate();
     }, function (error1) {
         console.error(error1);
     });
@@ -845,13 +939,8 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
     }
 
     function preprocess() {
-        var data = history[currentYear];
-        if (data === undefined) {
-            console.error(currentYear + "年不存在。");
-        }
-
-        heroes = data["heroes"];
-        relations = data["relations"]
+        heroes = history["nodes"];
+        relations = history["links"]
     }
 
     function initScene() {
@@ -877,14 +966,14 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
 
         //camera
         camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 1, 4000);
-        camera.position.z = 1200;
+        camera.position.z = 1300;
 
         //mouse
         raycaster = new THREE.Raycaster();
         raycaster.params.Points.threshold = 10;
 
         // globe
-        globe = new NETWORK.Globe(container, webglGroup1, cssGroup1, camera, raycaster);
+        globe = new NETWORK.Globe(webglGroup1, cssGroup1, camera, raycaster, target);
         globe.Init(heroes, relations);
 
         // webgl renderer
@@ -907,21 +996,36 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
 
         // event
         container.addEventListener("mousedown", onMouseDown, false);
+        container.addEventListener("mousewheel", onMouseWheel, false);
         window.addEventListener('resize', onWindowResize, false);
         document.addEventListener('mousemove', onDocumentMouseMove, false);
     }
 
     function onDocumentMouseMove(event) {
-        mouse.x = (event.clientX / container.offsetWidth) * 2 - 1;
-        mouse.y = -(event.clientY / container.offsetHeight) * 2 + 1;
+        mouse.x = ((event.clientX - $('#threejs-container').offset().left) / container.offsetWidth) * 2 - 1;
+        mouse.y = -((event.clientY - $('#threejs-container').offset().top) / container.offsetHeight) * 2 + 1;
+    }
+
+    function onMouseWheel(event) {
+        var delta = 0;
+        if (event.wheelDelta) {
+            delta = event.wheelDelta / 120;
+        }
+        else if (event.detail) {
+            delta = -event.wheelDelta / 3;
+        }
+        if (delta) {
+            globe.HandleWheel(delta);
+        }
+        event.returnValue = false;
     }
 
     function onMouseDown(event) {
         event.preventDefault();
 
-        container.addEventListener('mousemove', onMouseMove, false);
-        container.addEventListener('mouseup', onMouseUp, false);
-        container.addEventListener('mouseout', onMouseOut, false);
+        document.addEventListener('mousemove', onMouseMove, false);
+        document.addEventListener('mouseup', onMouseUp, false);
+        document.addEventListener('mouseout', onMouseOut, false);
 
         mouseOnDown.x = -event.clientX;
         mouseOnDown.y = event.clientY;
@@ -939,8 +1043,8 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
         controller.x = -event.clientX;
         controller.y = event.clientY;
 
-        target.x = targetOnDown.x + (controller.x - mouseOnDown.x) * 0.005;
-        target.y = targetOnDown.y + (controller.y - mouseOnDown.y) * 0.005;
+        target.x = targetOnDown.x + (controller.x - mouseOnDown.x) * 0.01;
+        target.y = targetOnDown.y + (controller.y - mouseOnDown.y) * 0.01;
 
         target.y = target.y > PI_HALF ? PI_HALF : target.y;
         target.y = target.y < -PI_HALF ? -PI_HALF : target.y;
@@ -950,15 +1054,15 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
         if (Math.abs(mouseOnDown.x - controller.x) < 1 && Math.abs(mouseOnDown.y - controller.y) < 1)
             globe.Select();
 
-        container.removeEventListener('mousemove', onMouseMove, false);
-        container.removeEventListener('mouseup', onMouseUp, false);
-        container.removeEventListener('mouseout', onMouseOut, false);
+        document.removeEventListener('mousemove', onMouseMove, false);
+        document.removeEventListener('mouseup', onMouseUp, false);
+        document.removeEventListener('mouseout', onMouseOut, false);
     }
 
     function onMouseOut(event) {
-        container.removeEventListener('mousemove', onMouseMove, false);
-        container.removeEventListener('mouseup', onMouseUp, false);
-        container.removeEventListener('mouseout', onMouseOut, false);
+        document.removeEventListener('mousemove', onMouseMove, false);
+        document.removeEventListener('mouseup', onMouseUp, false);
+        document.removeEventListener('mouseout', onMouseOut, false);
     }
 
     function onWindowResize() {
@@ -979,7 +1083,7 @@ NETWORK.FloatPanel = function (container, mainCamera, heroes) {
 
     function render() {
 
-        globe.Update(target);
+        globe.Update();
 
         cssRenderer.render(cssScene, camera);
         webglRenderer.render(webglScene, camera);
